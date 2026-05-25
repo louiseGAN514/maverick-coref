@@ -72,6 +72,10 @@ def ontonotes_to_dataframe(file_path):
         df["speakers"] = df["tokens"].apply(lambda x: ["-"] * len(x))
 
     if "clusters" in df.columns:
+        # keep only [start, end] per span — extra fields (entity type, text, …) are ignored
+        df["clusters"] = df["clusters"].apply(
+            lambda doc: [[span[:2] for span in cluster] for cluster in doc]
+        )
         df = df[["doc_key", "tokens", "speakers", "clusters", "EOS_indices"]]
     else:
         df = df[["doc_key", "tokens", "speakers", "EOS_indices"]]
