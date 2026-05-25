@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import spacy
 import hydra
@@ -47,7 +48,7 @@ def flatten(l):
 
 def ontonotes_to_dataframe(file_path):
     # read file
-    df = pd.read_json(hydra.utils.get_original_cwd() + "/" + file_path, lines=True)
+    df = pd.read_json(os.path.join(hydra.utils.get_original_cwd(), file_path), lines=True)
     # ontonotes is split into words and sentences, jin sentences
     if "sentences" in df.columns:
         df["tokens"] = df["sentences"].apply(lambda x: flatten(x))
