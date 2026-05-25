@@ -9,7 +9,7 @@ defaults:
   - _self_
   - train: default_train
   - model: mes/deberta-large
-  - data: ontonotes
+  - data: ontonotes-windowed
   - evaluation: default_evaluation
   - logging: wandb_logging
   - override hydra/job_logging: colorlog

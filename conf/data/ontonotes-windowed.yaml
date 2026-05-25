@@ -4,27 +4,27 @@ datamodule:
     train:
       _target_: data.datasets.OntonotesDataset
       name: 'train'
-      path: 'data/prepare_ontonotes/train.english.jsonlines'
+      path: 'data/gsapcoref/gsap_coref_train.jsonlines'
       batch_size: "${data.datamodule.batch_sizes.train}"
-      processed_dataset_path: 'data/cache_w${data.datamodule.dataset.train.window_size}_s${data.datamodule.dataset.train.stride}/${model.module.model.huggingface_model_name}/ontonotes/train'
+      processed_dataset_path: 'data/cache_w${data.datamodule.dataset.train.window_size}_s${data.datamodule.dataset.train.stride}/${model.module.model.huggingface_model_name}/gsapcoref/train'
       tokenizer: "${model.module.model.huggingface_model_name}"
       window_size: 512
       stride: null  # null → non-overlapping (stride = window_size); e.g. 256 for 50% overlap
     val:
       _target_: data.datasets.OntonotesDataset
       name: 'val'
-      path: 'data/prepare_ontonotes/dev.english.jsonlines'
+      path: 'data/gsapcoref/gsap_coref_dev.jsonlines'
       batch_size: "${data.datamodule.batch_sizes.train}"
-      processed_dataset_path: 'data/cache_w${data.datamodule.dataset.train.window_size}_s${data.datamodule.dataset.train.stride}/${model.module.model.huggingface_model_name}/ontonotes/val'
+      processed_dataset_path: 'data/cache_w${data.datamodule.dataset.train.window_size}_s${data.datamodule.dataset.train.stride}/${model.module.model.huggingface_model_name}/gsapcoref/val'
       tokenizer: "${model.module.model.huggingface_model_name}"
       window_size: 512
       stride: null
     test:
       _target_: data.datasets.OntonotesDataset
       name: 'test'
-      path: 'data/prepare_ontonotes/test.english.jsonlines'
+      path: 'data/gsapcoref/gsap_coref_test.jsonlines'
       batch_size: "${data.datamodule.batch_sizes.train}"
-      processed_dataset_path: 'data/cache_w${data.datamodule.dataset.train.window_size}_s${data.datamodule.dataset.train.stride}/${model.module.model.huggingface_model_name}/ontonotes/test'
+      processed_dataset_path: 'data/cache_w${data.datamodule.dataset.train.window_size}_s${data.datamodule.dataset.train.stride}/${model.module.model.huggingface_model_name}/gsapcoref/test'
       tokenizer: "${model.module.model.huggingface_model_name}"
       window_size: 512
       stride: null
