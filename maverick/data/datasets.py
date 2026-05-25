@@ -24,13 +24,17 @@ class OntonotesDataset(Dataset):
         self.batch_size = batch_size
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer, use_fast=True, add_prefix_space=True)
         self.max_doc_len = kwargs.get("max_doc_len", None)
+        self.window_size = kwargs.get("window_size", None)
+        self.stride = kwargs.get("stride", None)  # None → non-overlapping (stride = window_size)
         special_tokens_dict = {"additional_special_tokens": ["[SPEAKER_START]", "[SPEAKER_END]"]}
         self.tokenizer.add_special_tokens(special_tokens_dict)
         try:
             self.set = load_from_disk(hydra.utils.get_original_cwd() + "/" + processed_dataset_path + "/")
         except:
             self.set = dt.from_pandas(util.ontonotes_to_dataframe(path))
-            if self.stage == "train":
+            if self.window_size is not None:
+                self.set = self.split_into_windows(self.set)
+            elif self.stage == "train":
                 if "clusters" not in self.set.column_names:
                     print("Training set has to include cluster information")
                 # self.set = self.set.map(self.cut_document_to_length, batched=False)
@@ -42,6 +46,90 @@ class OntonotesDataset(Dataset):
 
     def prepare_data(self, set):
         return set.filter(lambda x: len(self.tokenizer(x["tokens"])["input_ids"]) <= self.max_doc_len)
+
+    def split_into_windows(self, dataset):
+        all_examples = []
+        for example in dataset:
+            all_examples.extend(self._split_document_into_windows(example))
+        return dt.from_list(all_examples)
+
+    def _split_document_into_windows(self, example):
+        tokens = example["tokens"]
+        clusters = example.get("clusters", [])
+        speakers = example["speakers"]
+        eos_indices = list(example["EOS_indices"])
+        doc_key = example["doc_key"]
+
+        encoded = self.tokenizer(tokens, add_special_tokens=True, is_split_into_words=True)
+        if len(encoded["input_ids"]) <= self.window_size:
+            return [example]
+
+        # BPE count per word (speaker tokens not counted; leave a small buffer below)
+        bpe_per_word = [0] * len(tokens)
+        for w_id in encoded.word_ids():
+            if w_id is not None:
+                bpe_per_word[w_id] += 1
+
+        # sentence i covers tokens[sent_starts[i] : eos_indices[i]]
+        sent_starts = [0] + eos_indices[:-1]
+        # reserve 10 tokens for [CLS]/[SEP] and possible speaker tokens
+        effective_limit = self.window_size - 10
+        stride = self.stride if self.stride is not None else self.window_size
+
+        # cum_bpe[i] = BPE tokens from document start up to (but not including) sentence i
+        cum_bpe = [0] * (len(eos_indices) + 1)
+        for i in range(len(eos_indices)):
+            cum_bpe[i + 1] = cum_bpe[i] + sum(bpe_per_word[sent_starts[i]:eos_indices[i]])
+
+        windows = []
+        win_idx = 0
+        sent_i = 0
+
+        while sent_i < len(eos_indices):
+            word_start = sent_starts[sent_i]
+            bpe_count = 0
+            sent_j = sent_i
+
+            while sent_j < len(eos_indices):
+                sent_bpe = sum(bpe_per_word[sent_starts[sent_j]:eos_indices[sent_j]])
+                if bpe_count + sent_bpe > effective_limit and sent_j > sent_i:
+                    break
+                bpe_count += sent_bpe
+                sent_j += 1
+
+            word_end = eos_indices[sent_j - 1]
+            window_tokens = tokens[word_start:word_end]
+            window_speakers = speakers[word_start:word_end]
+            window_eos = [eos_indices[i] - word_start for i in range(sent_i, sent_j)]
+
+            window_clusters = []
+            for cluster in clusters:
+                win_cluster = [
+                    [s - word_start, e - word_start]
+                    for s, e in cluster
+                    if s >= word_start and e < word_end
+                ]
+                if win_cluster:
+                    window_clusters.append(win_cluster)
+
+            windows.append({
+                "doc_key": f"{doc_key}_w{win_idx}",
+                "tokens": window_tokens,
+                "speakers": window_speakers,
+                "clusters": window_clusters,
+                "EOS_indices": window_eos,
+            })
+
+            win_idx += 1
+
+            # Advance to the first sentence whose BPE start is >= current window start + stride
+            next_bpe = cum_bpe[sent_i] + stride
+            next_sent_i = sent_i + 1
+            while next_sent_i < len(eos_indices) and cum_bpe[next_sent_i] < next_bpe:
+                next_sent_i += 1
+            sent_i = next_sent_i
+
+        return windows
 
     def cut_document_to_length(self, set_element):
         encoded_text = self.tokenizer(set_element["tokens"], add_special_tokens=True, is_split_into_words=True)
