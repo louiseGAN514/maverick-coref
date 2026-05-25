@@ -76,6 +76,7 @@ def ontonotes_to_dataframe(file_path):
         df["clusters"] = df["clusters"].apply(
             lambda doc: [[span[:2] for span in cluster] for cluster in doc]
         )
+        print("clusters after fix:", df["clusters"].iloc[0][:2])
         df = df[["doc_key", "tokens", "speakers", "clusters", "EOS_indices"]]
     else:
         df = df[["doc_key", "tokens", "speakers", "EOS_indices"]]
