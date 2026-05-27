@@ -19,3 +19,4 @@ module:
     huggingface_model_name: "microsoft/deberta-v3-large"
     freeze_encoder: False
     span_representation: "concat_start_end"
+    coref_threshold: 0.3

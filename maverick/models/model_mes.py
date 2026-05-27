@@ -26,6 +26,7 @@ class Maverick_mes(torch.nn.Module):
 
         # span representation, now is concat_start_end
         self.span_representation = kwargs["span_representation"]
+        self.coref_threshold = kwargs.get("coref_threshold", 0.3)
         # type of representation layer in 'Linear, FC, LSTM-left, LSTM-right, Conv1d'
         self.representation_layer_type = "FC"  # fullyconnected
         # span hidden dimension
@@ -140,7 +141,13 @@ class Maverick_mes(torch.nn.Module):
             start_logits_batch = self.start_token_classifier(lhs_batch).squeeze(-1)  # SEQ_LEN
 
             if gold_starts != None:
-                loss = torch.nn.functional.binary_cross_entropy_with_logits(start_logits_batch, gold_starts[bidx])
+                # pos_weight upweights the positive class to counter the severe imbalance between
+                # mention-start tokens and non-start tokens (typically ~1:100 ratio), which would
+                # otherwise push the model toward predicting no starts (high precision, low recall).
+                loss = torch.nn.functional.binary_cross_entropy_with_logits(
+                    start_logits_batch, gold_starts[bidx],
+                    pos_weight=torch.tensor(5.0, device=start_logits_batch.device),
+                )
 
                 # accumulate loss
                 start_loss = start_loss + loss
@@ -165,8 +172,8 @@ class Maverick_mes(torch.nn.Module):
             possible_end_idxs = possibles_start_end_idxs[:, 1]
 
             # extract start and end hidden states
-            starts_hidden_states = lhs_batch[possible_end_idxs]  # start
-            ends_hidden_states = lhs_batch[possible_start_idxs]  # end
+            starts_hidden_states = lhs_batch[possible_start_idxs]
+            ends_hidden_states = lhs_batch[possible_end_idxs]
 
             # concatenation of start to end representations created using a representation layer
             s2e_representations = torch.cat(
@@ -185,9 +192,13 @@ class Maverick_mes(torch.nn.Module):
 
             if s2e_logits.shape[0] != 0 and stage != "test":
                 if gold_mentions != None:
+                    # Same class-imbalance fix as start detection: most candidate spans are
+                    # not gold mentions, so pos_weight prevents the model from collapsing to
+                    # predicting no mentions.
                     mention_loss_batch = torch.nn.functional.binary_cross_entropy_with_logits(
                         s2e_logits,
                         gold_mentions[bidx][possible_start_idxs, possible_end_idxs],
+                        pos_weight=torch.tensor(5.0, device=s2e_logits.device),
                     )
                     mention_loss = mention_loss + mention_loss_batch
 
@@ -240,7 +251,12 @@ class Maverick_mes(torch.nn.Module):
         if stage == "train":
             labels = self._get_cluster_labels_after_pruning(mention_start_idxs, mention_end_idxs, gold)
             all_labels = self._get_all_labels(labels, mask)
-            coreference_loss = torch.nn.functional.binary_cross_entropy_with_logits(coref_logits, all_labels)
+            # Antecedent pairs are extremely sparse (one true antecedent per mention among
+            # all candidates), so pos_weight prevents the model from predicting no links.
+            coreference_loss = torch.nn.functional.binary_cross_entropy_with_logits(
+                coref_logits, all_labels,
+                pos_weight=torch.tensor(5.0, device=coref_logits.device),
+            )
 
         coref_logits = coref_logits.sum(dim=1)
         doc, m2a, singletons = self.create_mention_to_antecedent_singletons(mention_start_idxs, mention_end_idxs, coref_logits)
@@ -305,7 +321,9 @@ class Maverick_mes(torch.nn.Module):
         # m = (torch.ones_like(coref_logits[0], device=a.device) + (m2 - m1 - 1) / 1000).tril().fill_diagonal_(0).unsqueeze(0)
         # no_ant = 1 - torch.sum(a - a * m > 0.5, dim=-1).bool().float()
         # coref_logits = torch.cat((coref_logits - coref_logits * m, no_ant.unsqueeze(-1)), dim=-1)
-        no_ant = 1 - torch.sum(torch.sigmoid(coref_logits) > 0.5, dim=-1).bool().float()
+        # The no-antecedent sentinel wins the argmax when no candidate exceeds this threshold.
+        # Lower values increase cluster recall at the cost of precision (config: coref_threshold).
+        no_ant = 1 - torch.sum(torch.sigmoid(coref_logits) > self.coref_threshold, dim=-1).bool().float()
         # [batch_size, max_k, max_k + 1]
         coref_logits = torch.cat((coref_logits, no_ant.unsqueeze(-1)), dim=-1)
 
